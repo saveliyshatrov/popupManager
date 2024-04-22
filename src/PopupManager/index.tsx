@@ -1,9 +1,11 @@
 import { useState, createContext, useContext, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 export type Popup = {
-    name: string;
+    name?: string;
     Component: React.ReactNode;
     zIndex?: number;
+    useOverlay?: boolean;
+    closeWithOtherOverlayed?: boolean;
 }
 
 export type InjectPopupContextProps<T> = T & {
@@ -18,60 +20,83 @@ export const usePopups = ({initialZIndex}: {initialZIndex?: number}) => {
     const [stack, setStack] = useState([]);
     const [popupsCount, setPopupsCount] = useState(0);
 
+    const getPopupName = (value: Popup) => {
+        return value.name ? value.name : `${value.Component.name}-${popupsCount}`;
+    }
+
     const push = (values: Popup[]) => {
-        if (!values.length) return;
-        const names = [];
+        const createdIdNames = [];
         values.forEach(value => {
-            names.push(value.name);
+            setPopupsCount(prev => prev + 1);
+            const name = getPopupName(value);
+            createdIdNames.push(name);
             value.zIndex = value.zIndex || lastZIndex;
             if(value.zIndex === lastZIndex) {
                 setLastZIndex(prev => prev + 1);
             }
             setPopups(prev => ({
                 ...prev,
-                [value.name]: value,
+                [name]: {
+                    ...value,
+                    name,
+                },
             }))
         })
-        setStack(prev => [...(prev || []), names]);
-        setPopupsCount(prev => prev + values.length);
+        setStack(prev => [...(prev || []), createdIdNames]);
+        return createdIdNames;
     }
     const pushToCurrent = (values: Popup[]) => {
+        const createdIdNames = [];
         values.forEach(value => {
+            const name = getPopupName(value);
+            createdIdNames.push(name);
             value.zIndex = value.zIndex || lastZIndex;
             if(value.zIndex === lastZIndex) {
                 setLastZIndex(prev => prev + 1);
             }
             setPopups((prev) => ({
                 ...prev,
-                [value.name]: value,
+                [name]: {
+                    ...value,
+                    name,
+                },
             }));
             setStack(prev => {
                 const [prevFirst, ...otherPrev] = prev;
-                const newFirst = [...(prevFirst || []), value.name];
+                const newFirst = [...(prevFirst || []), name];
                 return [newFirst, ...otherPrev];
             });
             setPopupsCount(prev => prev + 1);
-        })
+        });
+        return createdIdNames;
     }
-    const closePopup = (options:{name?: string} | undefined) => () => {
-        const {name} = options || {};
+    const closePopup = (options: { name?: string } | { names?: string[] } | undefined) => () => {
+        const names = ((options || {}).names || [(options || {}).name]).filter(Boolean);
         setPopupsCount(prev => prev - 1);
         setLastZIndex(prev => prev - 1);
-        if (name) {
-            setStack(prev => {
-                if (!prev.length) return [];
-                prev[0] = prev[0].filter(popupName => popupName !== name);
-                return prev.filter(subStack => subStack.length > 0);
-            })
-            setPopups(prev => {
-                delete prev[name];
-                return prev;
+        if (names.length) {
+            names.forEach(name => {
+                setStack(prev => {
+                    if (!prev.length) return [];
+                    prev[0] = prev[0].filter(popupName => popupName !== name);
+                    return prev.filter(subStack => subStack.length > 0);
+                })
+                setPopups(prev => {
+                    const isUsedInStack = stack.reduce((acc, subStack) => subStack.includes(name) || acc, false);
+                    if (!isUsedInStack) {
+                        delete prev[name];
+                    }
+                    return prev;
+                })
             })
         } else {
             setPopups(prev => {
-                if (stack && stack[0].length) {
+                if (stack && stack.length && stack[0].length) {
                     stack[0].forEach(name => {
-                        delete prev[name];
+                        const isUsedInStack = stack.reduce((acc, subStack) => subStack.includes(name) || acc, false);
+                        if (!isUsedInStack) {
+                            delete prev[name];
+                        }
                     })
                 }
                 return prev;
@@ -92,14 +117,31 @@ export const usePopups = ({initialZIndex}: {initialZIndex?: number}) => {
     }
 };
 
-export const PopupCreator = ({withOverlay}: {withOverlay?: boolean}) => {
+export const PopupCreator = () => {
     const {popups, stack, closePopup} = useContext(PopupContext);
     if(!(stack[0] || []).length) return null;
     const popupsList = (stack[0]).map(name => popups[name]).map(({Component, name, props}) => <Component key={name} name={name} {...props}/>);
+    const popupsWithOverlay = stack[0].filter(name => popups[name].useOverlay);
+    const closeWithOtherOverlayed = popupsWithOverlay.filter(name => popups[name].closeWithOtherOverlayed);
+    const withOverlay = popupsWithOverlay.length > 0;
+
     const handleClick = () => {
-        closePopup({name: stack[0][0]})();
+        if (closeWithOtherOverlayed.length) {
+            closePopup({names: closeWithOtherOverlayed})();
+            return;
+        } else {
+            closePopup({name: popupsWithOverlay[0]})();
+        }
     }
     const portalProps = {
+        style: {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+        }
+    }
+
+    const overlayProps = {
         onClick: withOverlay ? handleClick : undefined,
         style: {
             position: 'absolute',
@@ -111,5 +153,8 @@ export const PopupCreator = ({withOverlay}: {withOverlay?: boolean}) => {
             left: 0,
         }
     }
-    return createPortal(<div {...portalProps}>{popupsList}</div>, document.body)
+    return createPortal(<div {...portalProps}>
+            {popupsList}
+        <div {...overlayProps}/>
+    </div>, document.body)
 }
