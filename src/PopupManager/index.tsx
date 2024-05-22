@@ -120,7 +120,7 @@ export const usePopups = ({initialZIndex}: {initialZIndex?: number}) => {
 export const PopupCreator = () => {
     const {popups, stack, closePopup} = useContext(PopupContext);
     if(!(stack[0] || []).length) return null;
-    const popupsList = (stack[0]).map(name => popups[name]).map(({Component, name, props}) => <Component key={name} name={name} {...props}/>);
+    const popupsList = (stack[0]).map(name => popups[name]).map(({Component, name, props, zIndex}) => <div key={name} style={{zIndex}}><Component name={name} {...props}/></div>);
     const popupsWithOverlay = stack[0].filter(name => popups[name].useOverlay);
     const closeWithOtherOverlayed = popupsWithOverlay.filter(name => popups[name].closeWithOtherOverlayed);
     const withOverlay = popupsWithOverlay.length > 0;
